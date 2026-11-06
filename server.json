@@ -1,0 +1,1 @@
+{"$schema":"https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json","name":"io.ohmstead/mcp","description":"Build wiring schematics in Ohmstead: parts, wires, terminal strips, cables, checks.","websiteUrl":"https://ohmstead.io","version":"0.1.0","packages":[{"registryType":"npm","identifier":"ohmstead","version":"0.1.0","transport":{"type":"stdio"}}]}
