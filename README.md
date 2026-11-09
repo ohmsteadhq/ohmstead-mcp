@@ -8,6 +8,22 @@ Ohmstead projects, as you.
 You need an Ohmstead account: download the app and sign in with your email. Pro and Student get every tool. Free accounts can read projects, search the Codex and run checks
 ([plans](https://ohmstead.io/?ref=mcp#pricing)).
 
+## Why it's different
+
+Most schematic MCP servers drive a CAD program: they click, place symbols and draw lines in EPLAN, AutoCAD
+Electrical, Altium or KiCad while it runs on your machine. Ohmstead has no drawing to drive. A project is data
+(parts, wire rows, strips, cables), so the assistant edits the design itself and Ohmstead draws the result.
+
+- **Official.** Made by Ohmstead and listed in the MCP Registry as `io.ohmstead/mcp`.
+- **Wires, not coordinates.** `PSU1:+ → TB1:3` is the whole instruction. Forty I/O points are one call.
+- **It checks its own work.** `validate_project` sizes wires and fuses (NEC, NFPA 79, ABYC E-11), finds
+  fan-outs, wrong clamps and mismatched connectors, and `fix_fanouts` / `optimize_strips` repair them.
+- **Real parts.** The Codex is a shared library of parts with their terminals, ratings and connectors.
+  The assistant searches it before it adds anything.
+- **From a PDF to a project.** The assistant reads a vendor or EPLAN wiring list and `import_wiring_list`
+  builds the project, parts and wires.
+- **No CAD seat.** One `npx` command on macOS, Windows or Linux.
+
 ## Set up
 
 Install the [Ohmstead app](https://ohmstead.io/?ref=mcp#start) and open it once, then sign in here with
