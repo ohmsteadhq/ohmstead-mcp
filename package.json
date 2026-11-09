@@ -1,0 +1,30 @@
+{
+  "name": "@ohmstead/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server that lets AI assistants read and edit Ohmstead projects and the Codex",
+  "type": "module",
+  "bin": {
+    "ohmstead-mcp": "dist/stdio.js"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "login": "node dist/stdio.js login",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/stdio.js",
+    "npm:prep": "npm run build && mkdir -p npm/dist && cp dist/ohmstead-mcp.mjs dist/THIRD_PARTY_NOTICES.md npm/dist/ && node -e \"const v=require('./npm/package.json').version,s=require('./npm/server.json');if(s.version!==v||s.packages[0].version!==v)throw new Error('npm/server.json version must match npm/package.json ('+v+')')\" && cd npm && npm pack --dry-run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@resvg/resvg-wasm": "2.6.2",
+    "@supabase/supabase-js": "^2.117.3",
+    "elkjs": "^0.12.0",
+    "nanoid": "^5.1.16",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -70,4 +70,14 @@ Company or on-prem server: `npx -y ohmstead login --server https://… --key <an
 Everything runs under your account's permissions, the same as the app. It reads and edits; it never deletes
 projects or Codex parts.
 
+## Source
+
+`src/` is the server: `stdio.ts` starts it, `tools.ts` defines every tool, `ohmstead.ts` reads and writes
+projects and the Codex through Supabase as the signed-in user, and `auth.ts` / `config.ts` handle sign-in.
+The drawing, sizing and checking engine is shared with the Ohmstead app and ships bundled inside the
+[`ohmstead`](https://www.npmjs.com/package/ohmstead) npm package (`build.mjs` makes that bundle). The
+Dockerfile runs the published package.
+
+Licensed under the [Functional Source License 1.1, MIT future license](LICENSE.md).
+
 Requires Node 20+. Questions: [howdy@ohmstead.io](mailto:howdy@ohmstead.io).
