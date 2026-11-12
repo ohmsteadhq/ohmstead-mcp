@@ -2,7 +2,6 @@
 // with optimistic concurrency, endpoint parsing, and plain-text rendering.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { scheduleEmbedPublish } from "./embedPublish";
 import { blockOf, findStripPort, jumpered, levelsAt, missingLevel, projectStripBom, ROLE_LABEL, stripParts } from "@/lib/doc/blocks";
 import { conductorsOf, placedConnector } from "@/lib/doc/cables";
 import { harnessesOf, harnessOfWire, harnessShown, minWiresOf, withHarnessTags } from "@/lib/doc/harnesses";
@@ -60,12 +59,19 @@ export function check<T>(res: { data: T; error: unknown }): T {
 
 const sortPorts = normalizePart;
 
+/** Hosted runs: the signed-in user is known up front, and background work goes to `defer` (Workers waitUntil). */
+export type RunOptions = { userId?: string; defer?: (work: Promise<unknown>) => void };
+
 export class Ohmstead {
   private cat: Catalog | null = null;
   private myTeams: MyTeam[] | null = null;
-  constructor(readonly db: SupabaseClient) {}
+  constructor(
+    readonly db: SupabaseClient,
+    private readonly opts: RunOptions = {},
+  ) {}
 
   async userId(): Promise<string> {
+    if (this.opts.userId) return this.opts.userId;
     const { data } = await this.db.auth.getUser();
     if (!data.user) throw new UserError("Not signed in. Run `ohmstead-mcp login`.");
     return data.user.id;
@@ -227,7 +233,8 @@ export class Ohmstead {
         await this.db.from("projects").update({ content: doc }).eq("id", id).eq("updated_at", row.updated_at).select("updated_at"),
       ) as { updated_at: string }[];
       if (saved.length) {
-        scheduleEmbedPublish(this.db, id, () => this.catalog());
+        // User embed links are paused (src/lib/embed/links.ts), so edits don't refresh embeds. To bring it back, call
+        // embedPublish.ts here again: scheduleEmbedPublish for stdio, publishEmbedNow through opts.defer when hosted.
         return { result, doc, row: { ...row, content: doc, updated_at: saved[0].updated_at } };
       }
     }

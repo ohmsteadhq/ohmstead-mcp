@@ -10,10 +10,14 @@ import { createStrip, epKey, fixAll, packAll, packStrip, setProjectBlock, setStr
 import { GENERIC_BLOCK, levelsAt, ROLE_LABEL, stripParts } from "@/lib/doc/blocks";
 import { devicesFromBom, planImport, reportText, wiresFromCsv, type ImportLevel, type ImportRows } from "@/lib/import";
 import * as cables from "@/lib/doc/cables";
+import { removeComponents } from "@/lib/doc/components";
+import { groupPath, moveGroup, removeGroup } from "@/lib/doc/groups";
 import { promoteHarness, updateHarness, withHarnessTags } from "@/lib/doc/harnesses";
 import { addPidItem, addPidLine, addPidSheet, movePidItems, orderPidSheet, pidEndPoint, pidItemByRef, pidPortRef, pidPortToward, removePidItems, removePidLines, removePidSheet, resizePidItem, setPidItemSymbol, updatePidItem, updatePidLine, updatePidSheet } from "@/lib/pid/edit";
 import { splitPidSheets } from "@/lib/pid/sheets";
-import { FRAME } from "@/lib/schematic/pages";
+import { FRAME, paginate } from "@/lib/schematic/pages";
+import { computeSchematic, nodeIdForComponent, nodeIdForGroup } from "@/lib/schematic";
+import { addPage, clearBlockPositions, movePage, nameAutoPage, positionKey, removePage, renamePage, setBlockPositions } from "@/lib/schematic/placement";
 import { linkPidItem, renamePidTag } from "@/lib/pid/link";
 import { PID_LINE_STYLES, PID_SYMBOLS, pidShape, type PidSymbol, isPidAnnotation, pidSymbol } from "@/lib/pid/symbols";
 import { pidTagOf } from "@/lib/pid/tags";
@@ -41,11 +45,12 @@ import {
   endLabel,
   UserError,
   Ohmstead,
+  type RunOptions,
 } from "./ohmstead.js";
 
 const GAUGE_HELP = 'Wire gauge: AWG ("18", "14 AWG", "1/0") or mm² ("1.5 mm²"). A bare number follows the project\'s gauge units. Default: the signal type\'s gauge.';
 
-export const INSTRUCTIONS = `Ohmstead builds control-panel wiring schematics without CAD.
+export const INSTRUCTIONS = `Ohmstead is electrical CAD software for wiring schematics: the project is data (parts and wire rows) and the drawing is generated from it.
 
 Model:
 - A project has components (device instances with a unique tag like PLC_MAIN, PSU1, K1), each linked to a Codex part.
@@ -53,13 +58,14 @@ Model:
 - Wires are grid rows: "FROM_TAG:TERMINAL" → "TO_TAG:TERMINAL" with a signal type (e.g. 24VDC (+), 0VDC (-), Protective Earth). If no signal is given, the From terminal's Codex default is used.
 - A device terminal takes one wire unless its Codex terminal allows more (max_wires), the user allowed it, or all wires are comms (daisy-chain). Extra wires are a "fan-out": route them through a terminal strip (TB1, TB2…) with fix_fanouts. Strips are project-level, not Codex parts; their terminals are created on demand.
 - Terminal blocks: Codex parts with category terminal can carry block data (kind, width, wire range, ratings, jumper style, accessory parts) and per-terminal level (A/B/C) and side (in/out). End plates, end stops, jumper bars and markers are accessory parts (block.kind accessory, no terminals). On a strip, each terminal is a block (strip default, project default or a generic block); multi-level blocks are addressed with a level letter: TB1:4A, TB1:4B. Set the project's default block and PE block with update_project (default_block, default_pe_block); fix_fanouts and add_terminal_strip use them. Change blocks on existing terminals with set_strip_blocks. A block's wire range is enforced: validate_project flags wires whose gauge is too big or small for the clamp they land on, and packing leaves such nets where they are. Packing can append spare terminals: update_project spare_terminal_pct sets how many, as a % of each strip's used terminals.
-- Subsystems group components; each has a signal flow (LR or TB).
+- Subsystems group components and can nest; each has a signal flow (LR or TB). update_subsystem renames one, moves it under another parent or changes its flow; remove_subsystem deletes it and moves its contents up a level. update_components moves components between subsystems; remove_components deletes them with their wires.
 - Connectors: a Codex part's terminals can be grouped into named connectors (X1, X2…), each pin with its own type and default signal, plus gender (male/female) and keying (e.g. M12 A). A pin is addressed "TAG:X1.3" in wires. Give terminals a connector in save_part / add_part_terminals.
 - Harnesses (H1, H2…): all loose wires between the same two subsystems, or a subsystem and a terminal strip, draw as one trunk line once there are enough of them (update_project harness_min, default 3). They are worked out from the wiring; get_project lists them and update_harness sets overrides. A wire set to draw as a reference stays one.
 - Cables (W1, W2…) join two connectors pin for pin (add_cable). Pins map 1:1 by default (same pin names, else pin order); each conductor is its own row with a signal and an optional conductor color (BN, WH, BU…). Edit with update_cable. Validation flags mated ends with the same gender or different keying. Loose wires may still land on single pins.
 - PLC racks: a PLC part (category plc) can have module slots (slot_count). I/O modules are separate Codex parts (category io). In a project, put a module in a PLC slot with update_components (plc + slot).
 - Sizing: projects pick a sizing standard (NEC by default, NFPA 79, ABYC E-11 DC for vehicles, vans and boats, or Low-voltage electronics for dev boards, breakouts and header pins), an ampacity column and an ambient temperature (update_project sizing_standard / sizing_column / ambient_c, default 40 °C); validate_project reports wires too small for their current, minimum sizes and fuse ratings with suggested values, from tables labelled "unverified tables" until the owner checks them. Ampacity is derated for bundling: the conductors of a cable count together, and loose wires sharing a bundle tag (add_connections / update_connection bundle) do too. Voltage drop (set lengths on wires and cables in the project's length unit, volts and phases on signal types, and the drop limits with update_project) is checked along each wire's run to the supply and flags wires over the branch or total limit; explain_sizing walks through any one wire's numbers (current, derating, drop, the fuse behind it, the suggestion).
 - P&ID: a project can carry a process view of the same document. Items are symbols from list_pid_symbols (add_pid_items); process lines join them (add_process_lines); update_pid_items moves, resizes or retags a placed item and its lines stay on. Ports are named by angle in the symbol's own frame, clockwise from up: 0, 90, 180, 270, and 90.1, 90.2 on a side with several. link_instrument ties an item to a wiring component, and the project's tag rule decides which tag it prints. An instrument's signal lines are derived from the wiring, so never add them by hand: wire the component and they appear. A hand-drawn signal line is only for something not wired yet, and validate_project flags it once the wiring disagrees. For words on the drawing use symbols note.text and area.frame, with the words as the tag and an at position: a note wraps to its width, an area is a labelled outline behind the drawing (room boundaries, skids) that prints on every sheet it crosses, and neither takes lines. add_pid_sheet places a named print sheet: a fixed frame that prints the items whose centres it holds; everything else tiles onto automatic sheets.
+- Schematic layout and pages: the drawing lays out automatically unless blocks are pinned. layout_view shows a view's blocks (position, size) and print pages; set_block_positions pins blocks, clear_block_positions unpins a whole view. A print page is a fixed-size frame placed in a view (add_page, update_page, remove_page); blocks whose centre is inside print on it, and everything else tiles onto automatic pages (auto:0, auto:1…), which update_page can name. Each subsystem's drill-down is its own view (subsystem).
 - Import: import_wiring_list turns an existing design (a PDF you read page by page, a wire-list CSV, a BOM) into a new project; dry run first, then apply after the user agrees.
 - Layout, routing and PDF are automatic in the app; the user opens the project in Ohmstead to see the drawing.
 
@@ -68,7 +74,11 @@ Changes are saved straight to the database. If the project is open in Ohmstead, 
  - Teams and classes: whoami lists the user's teams and their role (classes say instructor / TA / student / viewer). list_projects, create_project, save_part and import_wiring_list take an optional team (name or id); every other tool follows the project's team. A team project is visible to its creator, the team's owner/admins and members it's shared with. Submitted / issued (locked) projects are read-only, and so is a project a teammate has open for editing in Ohmstead (whichever side — schematic or P&ID — they're on). Using one of your private parts in a team project copies it into the team Codex.
 On the Free plan only the read-only tools are available; edits need Pro or Student (whoami shows the plan). A Free user who is an editor/student or up in an active team or class can still edit that team's projects and Codex.`;
 
-type Ctx = { getClient: () => Promise<SupabaseClient> };
+type Ctx = RunOptions & {
+  getClient: () => Promise<SupabaseClient>;
+  /** Runs before every tool call; a returned string refuses the call with that message (hosted: cap + usage log). */
+  beforeCall?: (tool: string) => Promise<string | null>;
+};
 type Plan = "free" | "student" | "pro";
 
 const PLAN_TTL = 5 * 60_000;
@@ -174,7 +184,7 @@ export function registerTools(server: McpServer, ctx: Ctx): Promise<unknown> {
     <A>(fn: (wc: Ohmstead, args: A) => Promise<string>) =>
     async (args: A) => {
       try {
-        return text(await fn(new Ohmstead(await ctx.getClient()), args));
+        return text(await fn(new Ohmstead(await ctx.getClient(), ctx), args));
       } catch (e) {
         return fail(e instanceof UserError ? e.message : `Error: ${(e as Error)?.message ?? String(e)}`);
       }
@@ -214,7 +224,7 @@ export function registerTools(server: McpServer, ctx: Ctx): Promise<unknown> {
   const teamTarget = async (args: unknown): Promise<boolean> => {
     const a = (args ?? {}) as { team?: unknown; project_id?: unknown; part_id?: unknown };
     try {
-      const wc = new Ohmstead(await ctx.getClient());
+      const wc = new Ohmstead(await ctx.getClient(), ctx);
       if (typeof a.team === "string" && a.team.trim()) return !!(await wc.team(a.team));
       if (typeof a.project_id === "string") return !!(await wc.project(a.project_id)).team_id;
       if (typeof a.part_id === "string") return !!(await wc.part(a.part_id)).team_id;
@@ -227,6 +237,8 @@ export function registerTools(server: McpServer, ctx: Ctx): Promise<unknown> {
   const tool: McpServer["registerTool"] = (name, config, cb) => {
     const readOnly = config.annotations?.readOnlyHint === true;
     const gated = (async (...a: unknown[]) => {
+      const refused = await ctx.beforeCall?.(name);
+      if (refused) return fail(refused);
       if (!readOnly && (await plan()) === "free" && !(teamWriter && (await teamTarget(a[0])))) return fail(teamWriter ? UPGRADE_TEAM : UPGRADE);
       return (cb as (...a: unknown[]) => unknown)(...a);
     }) as typeof cb;
@@ -693,6 +705,31 @@ export function registerTools(server: McpServer, ctx: Ctx): Promise<unknown> {
   );
 
   tool(
+    "remove_components",
+    {
+      title: "Remove components",
+      description:
+        "Delete components (devices or terminal strips) by tag, with every wire and cable on them. Modules in a removed PLC's rack come out of it; linked P&ID items stay and are unlinked. Nothing is deleted if any tag is unknown.",
+      inputSchema: { project_id: z.string(), tags: z.array(z.string()).min(1) },
+      annotations: { ...rw, destructiveHint: true },
+    },
+    run(async (wc, a: { project_id: string; tags: string[] }) => {
+      const { result, doc } = await wc.edit(a.project_id, (d) => {
+        const comps = a.tags.map((t) => componentByTag(d, t) ?? t);
+        const missing = comps.filter((c): c is string => typeof c === "string");
+        if (missing.length) throw new UserError(`No component tagged ${missing.join(", ")}. Nothing was removed.`);
+        const ids = [...new Set(comps.map((c) => (c as { id: string }).id))];
+        const next = removeComponents(d, ids);
+        const counts = { wires: d.connections.length - next.connections.length, cables: d.cables.length - next.cables.length };
+        const tags = ids.map((id) => d.components.find((c) => c.id === id)!.tag);
+        Object.assign(d, next);
+        return `Removed ${tags.join(", ")}` + (counts.wires || counts.cables ? `, with ${counts.wires} wire${counts.wires === 1 ? "" : "s"}${counts.cables ? ` and ${counts.cables} cable${counts.cables === 1 ? "" : "s"}` : ""}` : "") + ".";
+      });
+      return result + issuesFooter(doc, await wc.catalog());
+    }),
+  );
+
+  tool(
     "add_subsystem",
     {
       title: "Add subsystem",
@@ -708,6 +745,248 @@ export function registerTools(server: McpServer, ctx: Ctx): Promise<unknown> {
         return id;
       });
       return `Subsystem "${a.name}" created [${result}].`;
+    }),
+  );
+
+  tool(
+    "update_subsystem",
+    {
+      title: "Update subsystem",
+      description:
+        'Rename a subsystem, move it under another parent (parent: name/id, or "" for top level; its components and child subsystems come with it), or change its signal flow.',
+      inputSchema: { project_id: z.string(), subsystem: z.string().describe("Name or id"), name: z.string().min(1).optional(), parent: z.string().optional(), flow: flow.optional() },
+      annotations: rw,
+    },
+    run(async (wc, a: { project_id: string; subsystem: string; name?: string; parent?: string; flow?: Flow }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const id = groupRef(d, a.subsystem);
+        const g = d.groups.find((x) => x.id === id)!;
+        if (a.name !== undefined) {
+          const name = a.name.trim();
+          if (d.groups.some((x) => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) throw new UserError(`Subsystem "${name}" already exists.`);
+          g.name = name;
+        }
+        if (a.flow) g.flow = a.flow;
+        if (a.parent !== undefined) {
+          const parentId = a.parent === "" ? null : groupRef(d, a.parent);
+          const moved = moveGroup(d, id, parentId);
+          if (!moved) throw new UserError(`"${g.name}" can't go inside ${parentId === id ? "itself" : `"${a.parent}", which is inside it`}.`);
+          Object.assign(d, moved);
+        }
+        const now = d.groups.find((x) => x.id === id)!;
+        return `${now.name}${now.parentId ? ` (in ${groupPath(d.groups, now.parentId)})` : " (top level)"}, flow ${now.flow}`;
+      });
+      return `Subsystem updated: ${result}.`;
+    }),
+  );
+
+  tool(
+    "remove_subsystem",
+    {
+      title: "Remove subsystem",
+      description:
+        "Delete a subsystem. Nothing else is deleted: its components and child subsystems move up to its parent (or the top level).",
+      inputSchema: { project_id: z.string(), subsystem: z.string().describe("Name or id") },
+      annotations: { ...rw, destructiveHint: true },
+    },
+    run(async (wc, a: { project_id: string; subsystem: string }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const id = groupRef(d, a.subsystem);
+        const g = d.groups.find((x) => x.id === id)!;
+        const to = g.parentId ? `"${d.groups.find((x) => x.id === g.parentId)?.name}"` : "the top level";
+        const kids = d.groups.filter((x) => x.parentId === id).map((x) => x.name);
+        const comps = d.components.filter((c) => c.groupId === id).map((c) => c.tag);
+        Object.assign(d, removeGroup(d, id));
+        const moved = [comps.length ? `components ${comps.join(", ")}` : "", kids.length ? `subsystems ${kids.join(", ")}` : ""].filter(Boolean).join(" and ");
+        return `Removed "${g.name}".` + (moved ? ` Moved ${moved} to ${to}.` : "");
+      });
+      return result;
+    }),
+  );
+
+  const SCOPE_HELP = "Subsystem whose drill-down view this is (name or id). Omit for the project view.";
+  const scopeOf = (d: WireDoc, subsystem?: string) => (subsystem ? groupRef(d, subsystem) : null);
+  const viewName = (d: WireDoc, scope: string | null) => (scope ? `"${d.groups.find((g) => g.id === scope)?.name}"` : "the project view");
+
+  /** Block reference → node id: a component tag, a subsystem name, or a node id from layout_view (c:…, g:…, x:…). */
+  function nodeRef(d: WireDoc, ref: string): string {
+    const comp = componentByTag(d, ref);
+    if (comp) return nodeIdForComponent(comp.id);
+    const g = d.groups.find((x) => x.id === ref || x.name.toLowerCase() === ref.trim().toLowerCase());
+    if (g) return nodeIdForGroup(g.id);
+    if (/^[a-z]:\S+$/.test(ref.trim())) return ref.trim();
+    throw new UserError(`No component or subsystem "${ref}". layout_view lists the blocks of a view.`);
+  }
+
+  /** Page frame by id or name in a view; automatic pages are "auto:0", "auto:1"… (as layout_view lists them). */
+  function pageRef(d: WireDoc, ref: string, scope: string | null | undefined): { auto: number } | { id: string } {
+    const m = /^auto:(\d+)$/.exec(ref.trim());
+    if (m) return { auto: Number(m[1]) };
+    const inView = (p: { scope: string | null }) => scope === undefined || (p.scope ?? null) === scope;
+    const byId = d.pages.find((p) => p.id === ref);
+    if (byId) return { id: byId.id };
+    const hits = d.pages.filter((p) => inView(p) && p.name.toLowerCase() === ref.trim().toLowerCase());
+    if (hits.length > 1) throw new UserError(`${hits.length} pages are named "${ref}": ${hits.map((p) => `[${p.id}]`).join(", ")}. Pass the id, or the subsystem.`);
+    if (!hits.length) throw new UserError(`No page "${ref}"${scope !== undefined ? ` in ${viewName(d, scope)}` : ""}. Pages: ${d.pages.map((p) => `${p.name} [${p.id}]`).join(", ") || "none placed"}; automatic pages are auto:0, auto:1… (layout_view lists them).`);
+    return { id: hits[0].id };
+  }
+
+  tool(
+    "layout_view",
+    {
+      title: "Layout of a view",
+      description:
+        `Run the schematic layout for one view (the project, or a subsystem's drill-down) and list every block's position and size and every print page's frame, so blocks and pages can be placed without guessing. Block x, y are relative to the block's own subsystem (what set_block_positions takes); ax, ay are absolute in the view (what pages use). Pages are a fixed ${Math.round(FRAME.w)} × ${Math.round(FRAME.h)} frame; automatic pages (auto:0, auto:1…) cover whatever no placed page holds. Takes a few seconds, up to ~15 s on a large project.`,
+      inputSchema: { project_id: z.string(), subsystem: z.string().optional().describe(SCOPE_HELP) },
+      annotations: ro,
+    },
+    run(async (wc, a: { project_id: string; subsystem?: string }) => {
+      const row = await wc.project(a.project_id);
+      const d = row.content;
+      const scope = scopeOf(d, a.subsystem);
+      const cat = await wc.catalog();
+      const s = await computeSchematic(d, cat, scope);
+      const comps = new Map(d.components.map((c) => [c.id, c.tag]));
+      const r = (n: number) => Math.round(n);
+      const blocks = s.nodes
+        .filter((n) => n.componentId || n.group)
+        .map((n) => {
+          const name = n.group && n.kind === "group" ? n.group.name : (comps.get(n.componentId!) ?? n.label);
+          const pinned = d.positions[positionKey(scope, n.id)] ? " pinned" : "";
+          return `- ${name} [${n.id}] ${n.kind}${n.parentId ? ` in ${n.parentId}` : ""}: x ${r(n.x)}, y ${r(n.y)} (abs ${r(n.ax)}, ${r(n.ay)}), ${r(n.w)} × ${r(n.h)}${pinned}`;
+        });
+      const pages = paginate(s, d.pages, d.autoPageNames).map(
+        (p) => `- ${p.name} [${p.id}]${p.auto ? " automatic" : ""}: frame ${r(p.frame.x)}, ${r(p.frame.y)}, ${r(p.frame.w)} × ${r(p.frame.h)}, ${p.nodeIds.size} block${p.nodeIds.size === 1 ? "" : "s"}`,
+      );
+      const b = s.bounds;
+      return [
+        `Layout of ${viewName(d, scope)}: drawing ${r(b.x)}, ${r(b.y)}, ${r(b.w)} × ${r(b.h)}. Page frame ${r(FRAME.w)} × ${r(FRAME.h)}.`,
+        `Blocks (${blocks.length}):`,
+        ...blocks,
+        `Pages (${pages.length}):`,
+        ...pages,
+      ].join("\n");
+    }),
+  );
+
+  tool(
+    "set_block_positions",
+    {
+      title: "Set block positions",
+      description:
+        "Pin blocks (components, terminal strips or subsystems) at positions in one view, instead of where auto-layout puts them. x, y are the block's top-left, relative to its own subsystem in that view (layout_view shows current values). Unpinned blocks keep laying out automatically. Wires reroute in the app.",
+      inputSchema: {
+        project_id: z.string(),
+        subsystem: z.string().optional().describe(SCOPE_HELP),
+        blocks: z.array(z.object({ tag: z.string().describe("Component tag, subsystem name, or a node id from layout_view (reference flags are x:…)"), x: z.number(), y: z.number() })).min(1),
+      },
+      annotations: rw,
+    },
+    run(async (wc, a: { project_id: string; subsystem?: string; blocks: { tag: string; x: number; y: number }[] }) => {
+      const { result, doc } = await wc.edit(a.project_id, (d) => {
+        const scope = scopeOf(d, a.subsystem);
+        Object.assign(d, setBlockPositions(d, scope, a.blocks.map((b) => ({ nodeId: nodeRef(d, b.tag), x: b.x, y: b.y }))));
+        return `Pinned ${a.blocks.length} block${a.blocks.length === 1 ? "" : "s"} in ${viewName(d, scope)}.`;
+      });
+      return result + issuesFooter(doc, await wc.catalog());
+    }),
+  );
+
+  tool(
+    "clear_block_positions",
+    {
+      title: "Clear block positions",
+      description: "Unpin every block in one view so it goes back to auto-layout. Other views keep theirs.",
+      inputSchema: { project_id: z.string(), subsystem: z.string().optional().describe(SCOPE_HELP) },
+      annotations: { ...rw, destructiveHint: true },
+    },
+    run(async (wc, a: { project_id: string; subsystem?: string }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const scope = scopeOf(d, a.subsystem);
+        const before = Object.keys(d.positions).length;
+        Object.assign(d, clearBlockPositions(d, scope));
+        return `Cleared ${before - Object.keys(d.positions).length} position${before - Object.keys(d.positions).length === 1 ? "" : "s"} in ${viewName(d, scope)}; it lays out automatically again.`;
+      });
+      return result;
+    }),
+  );
+
+  tool(
+    "add_page",
+    {
+      title: "Add print page",
+      description:
+        `Place a print page: a fixed ${Math.round(FRAME.w)} × ${Math.round(FRAME.h)} frame in one view with its top-left at x, y (absolute view coordinates, as layout_view's ax, ay and frames). Blocks whose centre is inside print on it; the rest go on automatic pages after the placed ones. Pages print in the order they were added within each view.`,
+      inputSchema: { project_id: z.string(), name: z.string().min(1), subsystem: z.string().optional().describe(SCOPE_HELP), x: z.number(), y: z.number() },
+      annotations: rw,
+    },
+    run(async (wc, a: { project_id: string; name: string; subsystem?: string; x: number; y: number }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const scope = scopeOf(d, a.subsystem);
+        const { doc: next, page } = addPage(d, a.name, scope, a.x, a.y);
+        Object.assign(d, next);
+        return `Page "${page.name}" [${page.id}] added in ${viewName(d, scope)} at ${page.x}, ${page.y}.`;
+      });
+      return result;
+    }),
+  );
+
+  tool(
+    "update_page",
+    {
+      title: "Update print page",
+      description:
+        'Rename or move a print page. page: id or name of a placed page, or an automatic page "auto:0", "auto:1"… (with subsystem for a drill-down view; automatic pages can only be renamed, and an empty name gives back the automatic one).',
+      inputSchema: {
+        project_id: z.string(),
+        page: z.string(),
+        subsystem: z.string().optional().describe(SCOPE_HELP),
+        name: z.string().optional(),
+        x: z.number().optional(),
+        y: z.number().optional(),
+      },
+      annotations: rw,
+    },
+    run(async (wc, a: { project_id: string; page: string; subsystem?: string; name?: string; x?: number; y?: number }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const scope = a.subsystem ? groupRef(d, a.subsystem) : undefined;
+        const ref = pageRef(d, a.page, scope);
+        if ("auto" in ref) {
+          if (a.x !== undefined || a.y !== undefined) throw new UserError("Automatic pages can't be moved; add_page places a page of your own.");
+          if (a.name === undefined) throw new UserError("Pass name.");
+          Object.assign(d, nameAutoPage(d, scope ?? null, ref.auto, a.name));
+          return a.name.trim() ? `Automatic page ${ref.auto} in ${viewName(d, scope ?? null)} is now "${a.name.trim()}".` : `Automatic page ${ref.auto} has its automatic name again.`;
+        }
+        const p = d.pages.find((x) => x.id === ref.id)!;
+        if (a.name !== undefined) {
+          if (!a.name.trim()) throw new UserError("A placed page needs a name.");
+          Object.assign(d, renamePage(d, p.id, a.name));
+        }
+        if (a.x !== undefined || a.y !== undefined) Object.assign(d, movePage(d, p.id, a.x ?? p.x, a.y ?? p.y));
+        const now = d.pages.find((x) => x.id === p.id)!;
+        return `Page "${now.name}" [${now.id}] at ${now.x}, ${now.y}.`;
+      });
+      return result;
+    }),
+  );
+
+  tool(
+    "remove_page",
+    {
+      title: "Remove print page",
+      description: "Remove a placed print page (id or name). Its blocks stay where they are and print on automatic pages.",
+      inputSchema: { project_id: z.string(), page: z.string(), subsystem: z.string().optional().describe(SCOPE_HELP) },
+      annotations: { ...rw, destructiveHint: true },
+    },
+    run(async (wc, a: { project_id: string; page: string; subsystem?: string }) => {
+      const { result } = await wc.edit(a.project_id, (d) => {
+        const ref = pageRef(d, a.page, a.subsystem ? groupRef(d, a.subsystem) : undefined);
+        if ("auto" in ref) throw new UserError("Automatic pages can't be removed; they cover whatever no placed page holds.");
+        const p = d.pages.find((x) => x.id === ref.id)!;
+        Object.assign(d, removePage(d, p.id));
+        return `Removed page "${p.name}".`;
+      });
+      return result;
     }),
   );
 

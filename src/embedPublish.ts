@@ -32,6 +32,15 @@ async function publish(db: SupabaseClient, projectId: string, catalog: () => Pro
   await publishLiving(db, projectId, row.data.updated_at, snap);
 }
 
+/** Hosted: publish now, inside the request's waitUntil. Never throws. */
+export async function publishEmbedNow(db: SupabaseClient, projectId: string, catalog: () => Promise<Catalog>) {
+  try {
+    await publish(db, projectId, catalog);
+  } catch (e) {
+    console.error("Couldn't update the embed:", e instanceof Error ? e.message : e);
+  }
+}
+
 export function scheduleEmbedPublish(db: SupabaseClient, projectId: string, catalog: () => Promise<Catalog>) {
   clearTimeout(timers.get(projectId));
   timers.set(

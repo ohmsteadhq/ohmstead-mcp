@@ -1,7 +1,7 @@
 # Ohmstead MCP server
 
-[Ohmstead](https://ohmstead.io?ref=mcp) builds wiring schematics without CAD: you type the wires as rows,
-it draws the schematic, terminal strips and PDF drawing set. This package lets Claude (and other MCP
+[Ohmstead](https://ohmstead.io?ref=mcp) is electrical CAD software for wiring schematics: you type the wires
+as rows, and it draws the schematic, terminal strips and PDF drawing set. This package lets Claude (and other MCP
 clients) do the typing: add parts from the Codex, wire components, run checks and fix fan-outs in your
 Ohmstead projects, as you.
 
@@ -60,7 +60,8 @@ Company or on-prem server: `npx -y ohmstead login --server https://… --key <an
 | Area | Tools |
 |---|---|
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project`, `import_wiring_list`, `export_project_file`, `import_project_file` |
-| Components | `add_components`, `update_components`, `add_subsystem` |
+| Components | `add_components`, `update_components`, `remove_components`, `add_subsystem`, `update_subsystem`, `remove_subsystem` |
+| Layout and pages | `layout_view`, `set_block_positions`, `clear_block_positions`, `add_page`, `update_page`, `remove_page` |
 | Wires and cables | `add_connections`, `update_connection`, `remove_connections`, `add_cable`, `update_cable`, `remove_cable` |
 | Terminal strips | `add_terminal_strip`, `fix_fanouts`, `optimize_strips`, `split_strips`, `set_strip_blocks`, `set_strip_parts` |
 | P&ID | `add_pid_items`, `update_pid_items`, `add_process_lines`, `link_instrument`, `remove_pid_items`, `remove_process_lines`, `list_pid_symbols`, `add_pid_sheet`, `update_pid_sheet`, `remove_pid_sheet` |

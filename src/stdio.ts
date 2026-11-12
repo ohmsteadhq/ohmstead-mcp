@@ -14,7 +14,7 @@ import { clearSession, makeClient, sessionFile, signedInClient } from "./auth.js
 import { desktopBackend, forgetBackend, loadConfig, saveBackend } from "./config.js";
 import { INSTRUCTIONS, registerTools } from "./tools.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 const arg = (name: string) => {
   const i = process.argv.indexOf(name);
