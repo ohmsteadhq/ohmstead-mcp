@@ -1,8 +1,9 @@
 {
   "name": "@ohmstead/mcp",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "MCP server that lets AI assistants read and edit Ohmstead projects and the Codex",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "bin": {
     "ohmstead-mcp": "dist/stdio.js"
