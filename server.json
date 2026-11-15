@@ -3,12 +3,12 @@
   "name": "io.ohmstead/mcp",
   "description": "Build wiring schematics in Ohmstead: parts, wires, terminal strips, cables, checks.",
   "websiteUrl": "https://ohmstead.io",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "ohmstead",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "transport": {
         "type": "stdio"
       }

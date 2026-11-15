@@ -14,7 +14,7 @@ import { clearSession, makeClient, sessionFile, signedInClient } from "./auth.js
 import { desktopBackend, forgetBackend, loadConfig, saveBackend } from "./config.js";
 import { INSTRUCTIONS, registerTools } from "./tools.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 const arg = (name: string) => {
   const i = process.argv.indexOf(name);
@@ -73,11 +73,11 @@ async function whoami() {
 }
 
 async function serve() {
-  const cfg = loadConfig();
   const server = new McpServer({ name: "ohmstead", version: VERSION }, { instructions: INSTRUCTIONS });
-  // Sign-in is checked per call so the server still starts (and says how to log in) when signed out.
+  // Sign-in and config are checked per call so the server still starts and lists its tools (and each call
+  // says how to log in) when signed out or with no backend configured, e.g. a directory's inspector.
   // Waits for the plan so a Free user's first tool list is already read-only.
-  await registerTools(server, { getClient: () => signedInClient(cfg) });
+  await registerTools(server, { getClient: () => signedInClient(loadConfig()) });
   await server.connect(new StdioServerTransport());
 }
 
